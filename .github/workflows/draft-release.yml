@@ -1,0 +1,242 @@
+name: Draft release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fivemesh-logs-draft-release-main
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    name: Build and update draft release
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+
+    env:
+      DRAFT_MARKER: "<!-- fivemesh-logs-draft-release -->"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Resolve draft release version
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          draft_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.draft == true and ((.body // "") | contains("<!-- fivemesh-logs-draft-release -->"))) | .id' \
+            | head -n 1 || true)"
+
+          if [[ -n "${draft_id}" ]]; then
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${draft_id}" --jq '.tag_name')"
+          else
+            latest_tag="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
+
+            if [[ -n "${latest_tag}" ]]; then
+              base_version="${latest_tag#v}"
+            else
+              base_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+            fi
+
+            next_version="$(node -e '
+              const version = process.argv[1];
+              const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-.+)?$/);
+              if (!match) {
+                throw new Error(`Cannot auto-increment non-semver version: ${version}`);
+              }
+              const [, major, minor, patch] = match;
+              console.log(`${major}.${minor}.${Number(patch) + 1}`);
+            ' "${base_version}")"
+
+            tag="v${next_version}"
+          fi
+
+          version="${tag#v}"
+
+          {
+            echo "draft_id=${draft_id}"
+            echo "tag=${tag}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Update resource version files
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require("fs");
+
+          const version = process.env.RELEASE_VERSION;
+
+          const packagePath = "package.json";
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+          packageJson.version = version;
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const manifestPath = "fxmanifest.lua";
+          const manifest = fs.readFileSync(manifestPath, "utf8");
+          const versionPattern = /^(\s*)version\s+["'][^"']+["']/m;
+          const nextManifest = versionPattern.test(manifest)
+            ? manifest.replace(versionPattern, `$1version "${version}"`)
+            : `${manifest.replace(/\s*$/u, "")}\n\nversion "${version}"\n`;
+
+          fs.writeFileSync(manifestPath, nextManifest);
+          NODE
+
+      - name: Commit version bump
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- package.json fxmanifest.lua; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json fxmanifest.lua
+          git commit -m "chore(release): ${RELEASE_TAG} [skip ci]"
+          git push
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm run type-check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build Logs resource
+        run: pnpm run build
+
+      - name: Package FiveM resource
+        id: package
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset_name="fivemesh-logs-${RELEASE_TAG}.zip"
+          rm -rf release "${asset_name}"
+          mkdir -p release/fivemesh-logs
+
+          cp fxmanifest.lua release/fivemesh-logs/fxmanifest.lua
+          cp README.md LICENSE release/fivemesh-logs/
+          cp -R docs release/fivemesh-logs/docs
+          cp -R dist release/fivemesh-logs/dist
+
+          (cd release && zip -r "../${asset_name}" fivemesh-logs)
+
+          {
+            echo "asset_name=${asset_name}"
+            echo "asset_path=${asset_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Generate draft release notes
+        id: notes
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          ASSET_NAME: ${{ steps.package.outputs.asset_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_published_tag="$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
+
+          if [[ -n "${latest_published_tag}" ]]; then
+            commit_range="${latest_published_tag}..HEAD"
+          else
+            commit_range="HEAD"
+          fi
+
+          commits="$(git log "${commit_range}" \
+            --no-merges \
+            --invert-grep \
+            --grep='^chore(release):' \
+            --pretty=format:'- %s (%h)' || true)"
+
+          if [[ -z "${commits}" ]]; then
+            commits="- No user-facing commits detected yet."
+          fi
+
+          cat > release-notes.md <<EOF
+          ${DRAFT_MARKER}
+          Automated draft release for ${RELEASE_TAG}.
+
+          This draft is updated on every commit to \`main\` until it is published.
+
+          ## Changes
+
+          ${commits}
+
+          ## Asset
+
+          - \`${ASSET_NAME}\`
+          EOF
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.draft_id }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          ASSET_PATH: ${{ steps.package.outputs.asset_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          head_sha="$(git rev-parse HEAD)"
+          release_name="FiveMesh Logs ${RELEASE_TAG}"
+          release_body="$(cat release-notes.md)"
+
+          git tag -f "${RELEASE_TAG}" "${head_sha}"
+          git push --force origin "refs/tags/${RELEASE_TAG}"
+
+          if [[ -n "${RELEASE_ID}" ]]; then
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -f tag_name="${RELEASE_TAG}" \
+              -f target_commitish="${head_sha}" \
+              -f name="${release_name}" \
+              -f body="${release_body}" \
+              -F draft=true
+          else
+            gh release create "${RELEASE_TAG}" \
+              --draft \
+              --title "${release_name}" \
+              --notes-file release-notes.md \
+              --target "${head_sha}"
+          fi
+
+          gh release upload "${RELEASE_TAG}" "${ASSET_PATH}" --clobber
