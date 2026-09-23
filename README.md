@@ -5,9 +5,8 @@ server. Authorized staff open it with a command, search the same source
 connected in FiveMesh, inspect player identifiers and structured event data,
 and paginate through the newest results.
 
-The resource requires `fivemesh-sdk` 0.3.0 or newer. All FiveMesh API calls
-happen in the SDK's server runtime. The API key is never sent to a game client
-or the NUI.
+The resource requires `fivemesh-sdk` 0.1.5 or newer. All FiveMesh API calls
+happen in the SDK's server runtime.
 
 ## Preview
 
@@ -40,11 +39,11 @@ pnpm install
 pnpm build
 ```
 
-Create a FiveMesh API key with `logs:read`, then configure the SDK and staff
-permission before starting the resources:
+Create a FiveMesh API key with `logs:read` — ideally one that is specific to this
+server — then configure the SDK and staff permission before starting the
+resources:
 
 ```cfg
-set FIVEMESH_SERVER_ID "your-cfx-server-id"
 set FIVEMESH_LOGS_QUERY_API_KEY "fm_live_..."
 
 add_ace group.admin fivemesh.logs.view allow
@@ -52,6 +51,16 @@ add_ace group.admin fivemesh.logs.view allow
 ensure fivemesh-sdk
 ensure fivemesh-logs
 ```
+
+A server-specific key already names its server, so `FIVEMESH_SERVER_ID` is only
+required when the query key is global (all servers):
+
+```cfg
+set FIVEMESH_SERVER_ID "your-cfx-server-id"
+```
+
+The SDK checks the key on start and logs the organization, bound server and
+permissions to the server console.
 
 Staff with the ACE permission can run:
 
@@ -68,10 +77,10 @@ set FIVEMESH_LOGS_QUERY_API_KEY "fm_live_logs_read_key"
 
 ## Configuration
 
-| ConVar | Default | Description |
-| --- | --- | --- |
-| `FIVEMESH_LOGS_VIEWER_COMMAND` | `fmlogs` | In-game command used to open the viewer. |
-| `FIVEMESH_LOGS_VIEWER_ACE` | `fivemesh.logs.view` | ACE permission re-checked when opening and on every search. |
+| ConVar                         | Default              | Description                                                 |
+| ------------------------------ | -------------------- | ----------------------------------------------------------- |
+| `FIVEMESH_LOGS_VIEWER_COMMAND` | `fmlogs`             | In-game command used to open the viewer.                    |
+| `FIVEMESH_LOGS_VIEWER_ACE`     | `fivemesh.logs.view` | ACE permission re-checked when opening and on every search. |
 
 Set these ConVars before `ensure fivemesh-logs`.
 
