@@ -10,7 +10,6 @@ import {
   Filter,
   Image as ImageIcon,
   LoaderCircle,
-  Maximize2,
   RefreshCw,
   Search,
   Server,
@@ -833,28 +832,25 @@ function StructuredImageThumbnail({
   image: StructuredImage;
   onOpen: (image: StructuredImage) => void;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
+  const hostname = new URL(image.url).hostname;
 
   return (
     <button
       className="structured-image"
       type="button"
       onClick={() => onOpen(image)}
-      aria-label={`Enlarge image from ${image.path}`}
-      title="Click to enlarge"
+      aria-label={`Load external image from ${image.path}`}
+      title={`Load preview from ${hostname}`}
     >
-      <img
-        src={image.url}
-        alt=""
-        loading="lazy"
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
-      />
-      <span>
+      <span className="structured-image-consent" aria-hidden="true">
+        <ImageIcon size={18} />
+        <strong>External image</strong>
+        <small>{hostname}</small>
+      </span>
+      <span className="structured-image-footer">
         <ImageIcon size={12} />
         <span>{image.path}</span>
-        <Maximize2 size={12} />
+        <span className="structured-image-action">Load preview</span>
       </span>
     </button>
   );

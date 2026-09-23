@@ -827,7 +827,7 @@ pre {
   border: 1px solid #292b30;
   border-radius: 4px;
   background: #090a0c;
-  cursor: zoom-in;
+  cursor: pointer;
   transition:
     border-color 140ms ease,
     background 140ms ease;
@@ -838,15 +838,33 @@ pre {
   background: #111216;
 }
 
-.structured-image > img {
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  display: block;
-  object-fit: cover;
+.structured-image-consent {
+  min-height: 104px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  padding: 16px;
+  color: #8b8f97;
   background: #060709;
 }
 
-.structured-image > span {
+.structured-image-consent strong {
+  color: #b9bdc5;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.structured-image-consent small {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.structured-image-footer {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -856,10 +874,15 @@ pre {
   font-size: 8px;
 }
 
-.structured-image > span > span {
+.structured-image-footer > span {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.structured-image .structured-image-action {
+  color: #c5c8ce;
+  text-align: right;
 }
 
 .image-lightbox {
