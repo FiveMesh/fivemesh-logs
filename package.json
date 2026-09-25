@@ -1,6 +1,6 @@
 {
   "name": "@fivemesh/logs-viewer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "In-game FiveMesh Logs viewer for authorized FiveM staff.",
   "license": "MIT",

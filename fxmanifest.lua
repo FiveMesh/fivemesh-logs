@@ -6,7 +6,7 @@ node_version "22"
 
 author "FiveMesh"
 description "Secure in-game FiveMesh Logs viewer for server staff"
-version "0.1.2"
+version "0.1.3"
 
 dependency "fivemesh-sdk"
 
