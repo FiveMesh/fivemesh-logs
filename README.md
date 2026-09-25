@@ -39,12 +39,11 @@ pnpm install
 pnpm build
 ```
 
-Create a FiveMesh API key with `logs:read` — ideally one that is specific to this
-server — then configure the SDK and staff permission before starting the
-resources:
+Generate a Server API Key from this Server's page, then configure the SDK and
+staff permission before starting the resources:
 
 ```cfg
-set FIVEMESH_LOGS_QUERY_API_KEY "fm_live_..."
+set FIVEMESH_API_KEY "fm_server_..."
 
 add_ace group.admin fivemesh.logs.view allow
 
@@ -52,8 +51,8 @@ ensure fivemesh-sdk
 ensure fivemesh-logs
 ```
 
-A server-specific key already names its server, so `FIVEMESH_SERVER_ID` is only
-required when the query key is global (all servers):
+A Server API Key already names its Server. If you use a global Developer API
+Key instead, configure its legacy Cfx.re Logs address explicitly:
 
 ```cfg
 set FIVEMESH_SERVER_ID "your-cfx-server-id"
@@ -68,7 +67,7 @@ Staff with the ACE permission can run:
 /fmlogs
 ```
 
-If ingestion uses a separate key, keep both credentials narrowly scoped:
+Existing installations using separate Developer keys remain supported:
 
 ```cfg
 set FIVEMESH_LOGS_API_KEY "fm_live_logs_write_key"
