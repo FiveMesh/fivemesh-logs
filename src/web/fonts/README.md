@@ -1,0 +1,3 @@
+Locally bundled, unmodified normal variable WOFF2 files from the sibling FiveMesh app: @fontsource-variable/geist and @fontsource-variable/geist-mono, version 5.3.0. Latin and Latin Extended subsets; other characters use system fallbacks. Source: https://github.com/vercel/geist-font and https://fontsource.org/fonts/geist. Each face is distributed under its included SIL Open Font License 1.1. No runtime font service or package dependency.
+
+The license notices live in ../public/assets so Vite also includes them in dist/web/assets and the existing FiveM asset manifest packages them with the fonts.

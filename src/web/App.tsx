@@ -104,6 +104,9 @@ export function App() {
     useState<StructuredImage | null>(null);
   const openedOnce = useRef(false);
   const queryInFlight = useRef(false);
+  const eventTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const failedQuery = useRef<(() => Promise<void>) | null>(null);
+  const identifierError = error === "Identifier key and value must be provided together.";
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.event_id === selectedEventId) ?? null,
@@ -165,6 +168,7 @@ export function App() {
       (!filters.identifierKey || !filters.identifierValue)
     ) {
       setAdvancedOpen(true);
+      failedQuery.current = null;
       setError("Identifier key and value must be provided together.");
       return null;
     }
@@ -209,12 +213,14 @@ export function App() {
     queryInFlight.current = true;
     setLoading(true);
     setError(null);
+    failedQuery.current = null;
     try {
       const result = await postNui<LogsQueryResult>("query", {
         ...baseQuery,
         cursor: cursor || undefined,
       });
       if (!result.success) {
+        failedQuery.current = () => executeQuery(baseQuery, cursor, requestedPage, requestedCursors);
         setError(result.error.message);
         setRequestId(result.requestId ?? null);
         return;
@@ -233,6 +239,7 @@ export function App() {
       setRequestId(result.requestId ?? null);
       setLastUpdatedAt(new Date());
     } catch {
+      failedQuery.current = () => executeQuery(baseQuery, cursor, requestedPage, requestedCursors);
       setError("The Logs viewer could not reach the game client.");
     } finally {
       queryInFlight.current = false;
@@ -288,385 +295,415 @@ export function App() {
   return (
     <main className="viewport">
       <section className="viewer" aria-label="FiveMesh Logs viewer">
-        <header className="topbar">
-          <div className="brand">
-            <img
-              className="brand-logo"
-              src={fiveMeshLogo}
-              alt=""
-              aria-hidden="true"
-            />
-            <div className="brand-title">
-              <span>FiveMesh</span>
-              <strong>Logs</strong>
+        <div className="viewer-content">
+          <header className="topbar">
+            <div className="brand">
+              <img
+                className="brand-logo"
+                src={fiveMeshLogo}
+                alt=""
+                aria-hidden="true"
+              />
+              <div className="brand-title">
+                <span>FiveMesh</span>
+                <strong>Logs</strong>
+              </div>
             </div>
-          </div>
 
-          <div className="topbar-actions">
-            <button
-              className="icon-button"
-              type="button"
-              onClick={() => void refresh()}
-              disabled={loading}
-              aria-label="Refresh results"
-              title="Refresh results"
-            >
-              <RefreshCw size={16} className={loading ? "spinning" : ""} />
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              onClick={() => void closeViewer()}
-              aria-label="Close Logs viewer"
-              title="Close"
-            >
-              <X size={17} />
-            </button>
-          </div>
-        </header>
+            <div className="topbar-actions">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => void refresh()}
+                disabled={loading}
+                aria-label="Refresh results"
+                title="Refresh results"
+              >
+                <RefreshCw size={16} className={loading ? "spinning" : ""} />
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => void closeViewer()}
+                aria-label="Close Logs viewer"
+                title="Close"
+              >
+                <X size={17} />
+              </button>
+            </div>
+          </header>
 
-        <section className="filter-region" aria-label="Log filters">
-          <div className="primary-filters">
-            <Field label="Time range" icon={<Clock3 size={14} />}>
-              <div className="select-wrap">
-                <select
-                  value={filters.lookbackMinutes}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      lookbackMinutes: Number(event.target.value),
-                    }))
-                  }
-                >
-                  {TIME_RANGES.map((range) => (
-                    <option key={range.value} value={range.value}>
-                      Last {range.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </div>
-            </Field>
-
-            <Field label="Level" icon={<Filter size={14} />}>
-              <div className="select-wrap">
-                <select
-                  value={filters.level}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      level: event.target.value as DraftFilters["level"],
-                    }))
-                  }
-                >
-                  {LEVELS.map((level) => (
-                    <option key={level || "all"} value={level}>
-                      {level ? titleCase(level) : "All levels"}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </div>
-            </Field>
-
-            <Field label="Message" className="filter-grow">
-              <div className="input-with-icon">
-                <Search size={14} />
-                <input
-                  value={filters.message}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      message: event.target.value,
-                    }))
-                  }
-                  placeholder="Contains text"
-                  maxLength={512}
-                />
-              </div>
-            </Field>
-
-            <Field label="Event type">
-              <input
-                value={filters.eventType}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    eventType: event.target.value,
-                  }))
-                }
-                placeholder="player.joined"
-                maxLength={256}
-              />
-            </Field>
-
-            <Field label="Resource">
-              <input
-                value={filters.resource}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    resource: event.target.value,
-                  }))
-                }
-                placeholder="ox_inventory"
-                maxLength={256}
-              />
-            </Field>
-
-            <button
-              className="search-button"
-              type="button"
-              onClick={() => void searchFromDraft()}
-              disabled={loading}
-            >
-              {loading ? (
-                <LoaderCircle size={15} className="spinning" />
-              ) : (
-                <Search size={15} />
-              )}
-              Search
-            </button>
-          </div>
-
-          <div className="secondary-filter-toggle">
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((value) => !value)}
-              aria-expanded={advancedOpen}
-            >
-              <SlidersHorizontal size={14} />
-              Player and identifier filters
-              <ChevronDown
-                size={13}
-                className={advancedOpen ? "rotated" : ""}
-              />
-            </button>
-            {hasAdvancedFilters(filters) && (
-              <span className="active-filter-note">
-                <Check size={12} /> Active
-              </span>
-            )}
-          </div>
-
-          {advancedOpen && (
-            <div className="advanced-filters">
-              <Field label="Player handle" icon={<UserRound size={14} />}>
-                <input
-                  value={filters.playerId}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      playerId: event.target.value,
-                    }))
-                  }
-                  placeholder="42"
-                  maxLength={128}
-                />
-              </Field>
-              <Field label="Identifier owner">
+          <section className="filter-region" aria-label="Log filters">
+            <div className="primary-filters">
+              <Field label="Time range" icon={<Clock3 size={14} />}>
                 <div className="select-wrap">
                   <select
-                    value={filters.identifierOwner}
+                    value={filters.lookbackMinutes}
                     onChange={(event) =>
                       setFilters((current) => ({
                         ...current,
-                        identifierOwner: event.target
-                          .value as LogsIdentifierFilter["owner"],
+                        lookbackMinutes: Number(event.target.value),
                       }))
                     }
                   >
-                    <option value="player">Player</option>
-                    <option value="target">Target player</option>
+                    {TIME_RANGES.map((range) => (
+                      <option key={range.value} value={range.value}>
+                        Last {range.label}
+                      </option>
+                    ))}
                   </select>
                   <ChevronDown size={13} />
                 </div>
               </Field>
-              <Field label="Identifier key">
-                <input
-                  value={filters.identifierKey}
-                  onChange={(event) =>
-                    setFilters((current) => ({
-                      ...current,
-                      identifierKey: event.target.value,
-                    }))
-                  }
-                  placeholder="discord"
-                  maxLength={32}
-                />
+
+              <Field label="Level" icon={<Filter size={14} />}>
+                <div className="select-wrap">
+                  <select
+                    value={filters.level}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        level: event.target.value as DraftFilters["level"],
+                      }))
+                    }
+                  >
+                    {LEVELS.map((level) => (
+                      <option key={level || "all"} value={level}>
+                        {level ? titleCase(level) : "All levels"}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} />
+                </div>
               </Field>
-              <Field label="Exact identifier value" className="filter-grow">
+
+              <Field label="Message" className="filter-grow">
+                <div className="input-with-icon">
+                  <Search size={14} />
+                  <input
+                    value={filters.message}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        message: event.target.value,
+                      }))
+                    }
+                    placeholder="Contains text"
+                    maxLength={512}
+                  />
+                </div>
+              </Field>
+
+              <Field label="Event type">
                 <input
-                  value={filters.identifierValue}
+                  value={filters.eventType}
                   onChange={(event) =>
                     setFilters((current) => ({
                       ...current,
-                      identifierValue: event.target.value,
+                      eventType: event.target.value,
                     }))
                   }
-                  placeholder="219425737212772352"
+                  placeholder="player.joined"
                   maxLength={256}
                 />
               </Field>
+
+              <Field label="Resource">
+                <input
+                  value={filters.resource}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      resource: event.target.value,
+                    }))
+                  }
+                  placeholder="ox_inventory"
+                  maxLength={256}
+                />
+              </Field>
+
               <button
+                className="search-button"
                 type="button"
-                className="clear-button"
-                onClick={() =>
-                  setFilters((current) => ({
-                    ...current,
-                    playerId: "",
-                    identifierKey: "",
-                    identifierValue: "",
-                  }))
-                }
+                onClick={() => void searchFromDraft()}
+                disabled={loading}
               >
-                Clear
+                {loading ? (
+                  <LoaderCircle size={15} className="spinning" />
+                ) : (
+                  <Search size={15} />
+                )}
+                Search
               </button>
             </div>
-          )}
-        </section>
 
-        {error && (
-          <div className="error-banner" role="alert">
-            <AlertCircle size={15} />
-            <span>{error}</span>
-            {requestId && <code>Request {requestId}</code>}
-            <button
-              type="button"
-              onClick={() => setError(null)}
-              aria-label="Dismiss error"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        <div className="content">
-          <section className="results" aria-label="Log events">
-            <div className="results-heading">
-              <div>
-                <h1>Events</h1>
-                <p>
-                  {loading
-                    ? "Searching FiveMesh Logs…"
-                    : `${events.length} event${events.length === 1 ? "" : "s"} on page ${pageIndex + 1}`}
-                </p>
-              </div>
-              <div className="results-meta">
-                {lastUpdatedAt && (
-                  <span>Updated {formatRelative(lastUpdatedAt)}</span>
-                )}
-                <span className="sort-order">
-                  <span />
-                  Newest first
+            <div className="secondary-filter-toggle">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((value) => !value)}
+                aria-expanded={advancedOpen}
+                aria-controls="advanced-filters"
+              >
+                <SlidersHorizontal size={14} />
+                Player and identifier filters
+                <ChevronDown
+                  size={13}
+                  className={advancedOpen ? "rotated" : ""}
+                />
+              </button>
+              {hasAdvancedFilters(filters) && (
+                <span className="active-filter-note">
+                  <Check size={12} /> Active
                 </span>
-              </div>
-            </div>
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Level</th>
-                    <th>Event</th>
-                    <th>Resource</th>
-                    <th>Player</th>
-                    <th>Message</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && events.length === 0 ? (
-                    <LoadingRows />
-                  ) : (
-                    events.map((event) => (
-                      <tr
-                        key={event.event_id}
-                        className={
-                          selectedEventId === event.event_id ? "selected" : ""
-                        }
-                        onClick={() => {
-                          setPreviewImage(null);
-                          setSelectedEventId(event.event_id);
-                        }}
-                      >
-                        <td>
-                          <time dateTime={event.occurred_at}>
-                            {formatTime(event.occurred_at)}
-                          </time>
-                        </td>
-                        <td>
-                          <LevelLabel level={event.level} />
-                        </td>
-                        <td>
-                          <code className="event-type">
-                            {event.event_type}
-                          </code>
-                        </td>
-                        <td>
-                          <span className="resource-name">
-                            {event.resource || "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="player-handle">
-                            {event.player_id || "—"}
-                            {event.target_player_id && (
-                              <small>→ {event.target_player_id}</small>
-                            )}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="message-cell">{event.message}</span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-
-              {!loading && events.length === 0 && (
-                <div className="empty-state">
-                  <Search size={23} />
-                  <h2>No events found</h2>
-                  <p>
-                    Try a wider time range or remove one of the exact filters.
-                  </p>
-                </div>
               )}
             </div>
 
-            <footer className="pagination">
-              <button
-                type="button"
-                onClick={() => void previousPage()}
-                disabled={loading || pageIndex === 0}
-              >
-                <ArrowLeft size={14} />
-                Previous
-              </button>
-              <span>Page {pageIndex + 1}</span>
-              <button
-                type="button"
-                onClick={() => void nextPage()}
-                disabled={loading || !nextCursor}
-              >
-                Next
-                <ArrowRight size={14} />
-              </button>
-            </footer>
+            {advancedOpen && (
+              <div className="advanced-filters" id="advanced-filters">
+                <Field label="Player handle" icon={<UserRound size={14} />}>
+                  <input
+                    value={filters.playerId}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        playerId: event.target.value,
+                      }))
+                    }
+                    placeholder="42"
+                    maxLength={128}
+                  />
+                </Field>
+                <Field label="Identifier owner">
+                  <div className="select-wrap">
+                    <select
+                      value={filters.identifierOwner}
+                      onChange={(event) =>
+                        setFilters((current) => ({
+                          ...current,
+                          identifierOwner: event.target
+                            .value as LogsIdentifierFilter["owner"],
+                        }))
+                      }
+                    >
+                      <option value="player">Player</option>
+                      <option value="target">Target player</option>
+                    </select>
+                    <ChevronDown size={13} />
+                  </div>
+                </Field>
+                <Field label="Identifier key">
+                  <input
+                    value={filters.identifierKey}
+                    aria-invalid={identifierError || undefined}
+                    aria-describedby={identifierError ? "viewer-error" : undefined}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        identifierKey: event.target.value,
+                      }))
+                    }
+                    placeholder="discord"
+                    maxLength={32}
+                  />
+                </Field>
+                <Field label="Exact identifier value" className="filter-grow">
+                  <input
+                    value={filters.identifierValue}
+                    aria-invalid={identifierError || undefined}
+                    aria-describedby={identifierError ? "viewer-error" : undefined}
+                    onChange={(event) =>
+                      setFilters((current) => ({
+                        ...current,
+                        identifierValue: event.target.value,
+                      }))
+                    }
+                    placeholder="219425737212772352"
+                    maxLength={256}
+                  />
+                </Field>
+                <button
+                  type="button"
+                  className="clear-button"
+                  onClick={() =>
+                    setFilters((current) => ({
+                      ...current,
+                      playerId: "",
+                      identifierKey: "",
+                      identifierValue: "",
+                    }))
+                  }
+                >
+                  Clear
+                </button>
+              </div>
+            )}
           </section>
 
-          {selectedEvent && (
-            <EventDetails
-              event={selectedEvent}
-              onClose={() => {
-                setPreviewImage(null);
-                setSelectedEventId(null);
-              }}
-              onPreviewImage={setPreviewImage}
-            />
+          {error && (
+            <div className="error-banner" id="viewer-error" role="alert">
+              <AlertCircle size={15} />
+              <span>{error}</span>
+              {requestId && <code>Request {requestId}</code>}
+              {failedQuery.current && (
+                <button type="button" onClick={() => void failedQuery.current?.()} disabled={loading}>
+                  Retry
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Dismiss error"
+              >
+                <X size={14} />
+              </button>
+            </div>
           )}
+
+          <div className="content">
+            <section className="results" aria-label="Log events">
+              <div className="results-heading">
+                <div>
+                  <h1>Events</h1>
+                  <p role="status" aria-live="polite" aria-atomic="true">
+                    {loading
+                      ? "Searching FiveMesh Logs…"
+                      : `${events.length} event${events.length === 1 ? "" : "s"} on page ${pageIndex + 1}`}
+                  </p>
+                </div>
+                <div className="results-meta">
+                  {lastUpdatedAt && (
+                    <span>Updated {formatRelative(lastUpdatedAt)}</span>
+                  )}
+                  <span className="sort-order">
+                    <span />
+                    Newest first
+                  </span>
+                </div>
+              </div>
+
+              <div className="table-wrap" aria-busy={loading}>
+                <table aria-label="Log events, newest first">
+                  <thead>
+                    <tr>
+                      <th scope="col">Time</th>
+                      <th scope="col">Level</th>
+                      <th scope="col">Event</th>
+                      <th scope="col">Resource</th>
+                      <th scope="col">Player</th>
+                      <th scope="col">Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading && events.length === 0 ? (
+                      <LoadingRows />
+                    ) : (
+                      events.map((event) => (
+                        <tr
+                          key={event.event_id}
+                          className={
+                            selectedEventId === event.event_id ? "selected" : ""
+                          }
+                          onClick={() => {
+                            setPreviewImage(null);
+                            setSelectedEventId(event.event_id);
+                          }}
+                        >
+                          <td>
+                            <time dateTime={event.occurred_at}>
+                              {formatTime(event.occurred_at)}
+                            </time>
+                          </td>
+                          <td>
+                            <LevelLabel level={event.level} />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="event-select"
+                              ref={(element) => {
+                                if (element) eventTriggers.current.set(event.event_id, element);
+                                else eventTriggers.current.delete(event.event_id);
+                              }}
+                              aria-label={`Inspect ${event.event_type} at ${formatTime(event.occurred_at)}`}
+                              aria-pressed={selectedEventId === event.event_id}
+                              aria-controls={selectedEventId === event.event_id ? "event-details" : undefined}
+                              onClick={() => {
+                                setPreviewImage(null);
+                                setSelectedEventId(event.event_id);
+                              }}
+                              title={event.event_type}
+                            >
+                              <code className="event-type">{event.event_type}</code>
+                            </button>
+                          </td>
+                          <td>
+                            <span className="resource-name">
+                              {event.resource || "—"}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="player-handle">
+                              {event.player_id || "—"}
+                              {event.target_player_id && (
+                                <small>→ {event.target_player_id}</small>
+                              )}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="message-cell">{event.message}</span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+
+                {!loading && events.length === 0 && (
+                  <div className="empty-state">
+                    <Search size={23} />
+                    <h2>No events found</h2>
+                    <p>
+                      Try a wider time range or remove one of the exact filters.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <footer className="pagination">
+                <button
+                  type="button"
+                  onClick={() => void previousPage()}
+                  disabled={loading || pageIndex === 0}
+                >
+                  <ArrowLeft size={14} />
+                  Previous
+                </button>
+                <span>Page {pageIndex + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => void nextPage()}
+                  disabled={loading || !nextCursor}
+                >
+                  Next
+                  <ArrowRight size={14} />
+                </button>
+              </footer>
+            </section>
+
+            {selectedEvent && (
+              <EventDetails
+                event={selectedEvent}
+                onClose={() => {
+                  setPreviewImage(null);
+                  setSelectedEventId(null);
+                  requestAnimationFrame(() => {
+                    eventTriggers.current.get(selectedEvent.event_id)?.focus({ preventScroll: true });
+                  });
+                }}
+                onPreviewImage={setPreviewImage}
+              />
+            )}
+          </div>
         </div>
         {previewImage && (
           <ImageLightbox
@@ -720,6 +757,17 @@ function EventDetails({
   onPreviewImage: (image: StructuredImage) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState("");
+  const detailsClose = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 600px)").matches) {
+      detailsClose.current?.focus({ preventScroll: true });
+    }
+  }, []);
+  useEffect(() => {
+    setCopied(false);
+    setCopyFeedback("");
+  }, [event.event_id]);
   const structuredImages = useMemo(
     () => extractImageUrls(event.data),
     [event.data],
@@ -729,14 +777,16 @@ function EventDetails({
     try {
       await writeClipboard(JSON.stringify(event, null, 2));
       setCopied(true);
+      setCopyFeedback("Event JSON copied.");
       setTimeout(() => setCopied(false), 1_500);
     } catch {
       setCopied(false);
+      setCopyFeedback("Could not copy event JSON. Clipboard access is unavailable.");
     }
   }
 
   return (
-    <aside className="details" aria-label="Event details">
+    <aside className="details" id="event-details" aria-label="Event details">
       <div className="details-header">
         <div>
           <span className="details-kicker">Event details</span>
@@ -753,6 +803,7 @@ function EventDetails({
             {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
           <button
+            ref={detailsClose}
             type="button"
             className="icon-button"
             onClick={onClose}
@@ -764,6 +815,7 @@ function EventDetails({
       </div>
 
       <div className="details-scroll">
+        <p className={copyFeedback ? "copy-feedback" : "sr-only"} role="status">{copyFeedback}</p>
         <section className="message-detail">
           <LevelLabel level={event.level} />
           <p>{event.message}</p>
@@ -806,7 +858,7 @@ function EventDetails({
             <h3>
               <Braces size={14} /> Structured data
             </h3>
-            <pre>{JSON.stringify(event.data, null, 2)}</pre>
+            <pre tabIndex={0} aria-label="Structured event data">{JSON.stringify(event.data, null, 2)}</pre>
             {structuredImages.length > 0 && (
               <div className="structured-images">
                 {structuredImages.map((image) => (
@@ -864,13 +916,42 @@ function ImageLightbox({
   onClose: () => void;
 }) {
   const [failed, setFailed] = useState(false);
+  const dialog = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const background = dialog.current?.previousElementSibling;
+    background?.setAttribute("inert", "");
+    closeButton.current?.focus({ preventScroll: true });
+    // This dialog has one interactive control. Tab and Shift+Tab stay on it.
+    const containFocus = (event: FocusEvent) => {
+      if (event.target !== closeButton.current) closeButton.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("focusin", containFocus);
+    return () => {
+      document.removeEventListener("focusin", containFocus);
+      background?.removeAttribute("inert");
+      opener?.focus({ preventScroll: true });
+    };
+  }, []);
 
   return (
     <div
+      ref={dialog}
       className="image-lightbox"
       role="dialog"
       aria-modal="true"
       aria-label="Structured data image preview"
+      onKeyDown={(event) => {
+        if (event.key === "Tab") {
+          event.preventDefault();
+          closeButton.current?.focus();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -882,6 +963,7 @@ function ImageLightbox({
             {image.path}
           </span>
           <button
+            ref={closeButton}
             className="icon-button"
             type="button"
             onClick={onClose}
@@ -891,7 +973,7 @@ function ImageLightbox({
           </button>
         </div>
         {failed ? (
-          <div className="image-load-error">
+          <div className="image-load-error" role="status">
             <AlertCircle size={18} />
             This image could not be loaded.
           </div>
